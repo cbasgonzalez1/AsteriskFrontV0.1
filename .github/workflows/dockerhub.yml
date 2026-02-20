@@ -28,8 +28,8 @@ jobs:
       - name: Build and Push Image
         uses: docker/build-push-action@v6
         with:
-          context: .
-          file: ./Dockerfile
+          context: ./vite-frontend
+          file: ./vite-frontend/Dockerfile
           push: true
           tags: |
             ${{ env.IMAGE_NAME }}:latest
