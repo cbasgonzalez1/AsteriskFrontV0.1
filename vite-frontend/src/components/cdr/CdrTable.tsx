@@ -1,112 +1,106 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
+import type { CdrRow, FiltersState } from './cdrTypes'
+import { COLUMNS } from './cdrColumns'
+import { fetchCdr } from '../../api/cdrApi'
+import { MAX_OPTIONS, PAGE_SIZE, normalize, safeDate, valueToText } from './cdrUtils'
+import { useFilteredRows, usePagedRows, useUniqueOptions } from './useCdrFilters'
+import { CdrEditModal } from './CdrEditModal'
 
-type CdrRow = {
-  calldate: string
-  clid: string
-  src: string
-  dst: string
-  dcontext: string
-  channel: string
-  dstchannel: string
-  lastapp: string
-  lastdata: string
-  duration: number
-  billsec: number
-  disposition: string
-  amaflags: number
-  accountcode: string
-  uniqueid: string
-  userfield: string
-}
-
-const COLUMNS: { key: keyof CdrRow; label: string }[] = [
-  { key: 'calldate', label: 'Fecha' },
-  { key: 'clid', label: 'CLID' },
-  { key: 'src', label: 'SRC' },
-  { key: 'dst', label: 'DST' },
-  { key: 'dcontext', label: 'Contexto' },
-  { key: 'channel', label: 'Channel' },
-  { key: 'dstchannel', label: 'DstChannel' },
-  { key: 'lastapp', label: 'LastApp' },
-  { key: 'lastdata', label: 'LastData' },
-  { key: 'duration', label: 'Dur' },
-  { key: 'billsec', label: 'Bill' },
-  { key: 'disposition', label: 'Estado' },
-  { key: 'amaflags', label: 'AmaFlags' },
-  { key: 'accountcode', label: 'Account' },
-  { key: 'uniqueid', label: 'UniqueID' },
-  { key: 'userfield', label: 'UserField' },
-]
-
-const PAGE_SIZE = 20
-const MAX_OPTIONS = 80
-const MAX_UNIQUES_HARD = 500
-
-function safeDate(v: unknown) {
-  const d = new Date(String(v))
-  return isNaN(d.getTime()) ? String(v) : d.toLocaleString()
-}
-
-function normalize(v: unknown) {
-  return String(v ?? '').toLowerCase().trim()
-}
-
-function valueToText(row: CdrRow, key: keyof CdrRow) {
-  const v = row[key]
-  return key === 'calldate' ? safeDate(v) : String(v ?? '')
-}
-
-type ColFilterState = { text: string; selected: string[] }
-type FiltersState = Partial<Record<keyof CdrRow, ColFilterState>>
-
-const inputStyle: React.CSSProperties = {
-  padding: 10,
-  borderRadius: 10,
-  border: '1px solid #444',
-  background: '#111',
-  color: '#fff',
-  outline: 'none',
-}
-
-const buttonStyle: React.CSSProperties = {
-  padding: '8px 12px',
-  borderRadius: 10,
-  border: '1px solid #444',
-  background: '#161616',
-  color: '#fff',
-  cursor: 'pointer',
-}
-
-const smallButtonStyle: React.CSSProperties = {
-  padding: '6px 10px',
-  borderRadius: 10,
-  border: '1px solid #444',
-  background: '#161616',
-  color: '#fff',
-  cursor: 'pointer',
-  fontSize: 12,
-}
+const styles = {
+  root: {
+    padding: 16,
+    height: '100vh',
+    overflow: 'hidden',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 12,
+  } as const,
+  title: { margin: 0 } as const,
+  topBar: { display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' } as const,
+  input: {
+    padding: 10,
+    borderRadius: 10,
+    border: '1px solid #444',
+    background: '#111',
+    color: '#fff',
+    outline: 'none',
+  } as const,
+  button: {
+    padding: '8px 12px',
+    borderRadius: 10,
+    border: '1px solid #444',
+    background: '#161616',
+    color: '#fff',
+    cursor: 'pointer',
+  } as const,
+  buttonPrimary: {
+    padding: '8px 12px',
+    borderRadius: 10,
+    border: '1px solid #2b5cff55',
+    background: '#2b5cff33',
+    color: '#cdd7ff',
+    cursor: 'pointer',
+  } as const,
+  tableViewport: { flex: 1, minHeight: 0, overflow: 'auto' } as const,
+  table: {
+    borderCollapse: 'collapse',
+    width: '100%',
+    background: '#0f0f0f',
+    border: '1px solid #2a2a2a',
+    borderRadius: 12,
+    overflow: 'hidden',
+  } as const,
+  theadRow: { position: 'sticky', top: 0, zIndex: 20, background: '#121212' } as const,
+  th: {
+    textAlign: 'left',
+    borderBottom: '1px solid #333',
+    padding: 8,
+    whiteSpace: 'nowrap',
+    position: 'relative',
+    background: '#121212',
+  } as const,
+  td: { padding: 8, borderBottom: '1px solid #2f2f2f', whiteSpace: 'nowrap' } as const,
+  footer: { display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end' } as const,
+  popover: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    marginTop: 8,
+    zIndex: 50,
+    background: '#1a1a1a',
+    border: '1px solid #444',
+    borderRadius: 12,
+    padding: 12,
+    minWidth: 260,
+    boxShadow: '0 10px 28px rgba(0,0,0,.45)',
+  } as const,
+  smallButton: {
+    padding: '6px 10px',
+    borderRadius: 10,
+    border: '1px solid #444',
+    background: '#161616',
+    color: '#fff',
+    cursor: 'pointer',
+    fontSize: 12,
+  } as const,
+} as const
 
 export function CdrTable() {
   const [rows, setRows] = useState<CdrRow[]>([])
   const [error, setError] = useState<string | null>(null)
 
   const [q, setQ] = useState('')
+  const [filters, setFilters] = useState<FiltersState<CdrRow>>({})
   const [openFilterKey, setOpenFilterKey] = useState<keyof CdrRow | null>(null)
-  const [filters, setFilters] = useState<FiltersState>({})
+
   const [page, setPage] = useState(1)
+  const [isEditOpen, setIsEditOpen] = useState(false)
 
   useEffect(() => {
-    fetch('/api/cdr?limit=500')
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        return r.json()
-      })
-      .then((data: CdrRow[]) => setRows(data))
-      .catch((e) => setError(String(e)))
+    fetchCdr(500).then(setRows).catch((e) => setError(String(e)))
   }, [])
 
-  // Cerrar popover al click afuera + Escape
+  // cerrar popover click afuera + Escape
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
       const el = e.target as HTMLElement
@@ -125,80 +119,13 @@ export function CdrTable() {
     }
   }, [])
 
-  // Reset de página cuando cambien filtros
   useEffect(() => {
     setPage(1)
   }, [q, filters])
 
-  // ✅ Orden: numérico si es número, fecha si es fecha, texto natural si no
-  const uniqueOptionsByColumn = useMemo(() => {
-    const map = {} as Record<keyof CdrRow, string[]>
-
-    const smartSort = (a: string, b: string) => {
-      if (!a) return -1
-      if (!b) return 1
-
-      const na = Number(a)
-      const nb = Number(b)
-      if (!isNaN(na) && !isNaN(nb)) return na - nb
-
-      const da = new Date(a)
-      const db = new Date(b)
-      if (!isNaN(da.getTime()) && !isNaN(db.getTime())) return da.getTime() - db.getTime()
-
-      return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
-    }
-
-    for (const c of COLUMNS) {
-      const uniques = new Set<string>()
-      for (const r of rows) {
-        uniques.add(valueToText(r, c.key))
-        if (uniques.size >= MAX_UNIQUES_HARD) break
-      }
-      map[c.key] = Array.from(uniques).sort(smartSort)
-    }
-
-    return map
-  }, [rows])
-
-  const filteredRows = useMemo(() => {
-    const qn = normalize(q)
-
-    return rows.filter((r) => {
-      if (qn) {
-        const passGlobal = COLUMNS.some((c) => normalize(r[c.key]).includes(qn))
-        if (!passGlobal) return false
-      }
-
-      for (const c of COLUMNS) {
-        const st = filters[c.key]
-        if (!st) continue
-
-        const cellRaw = normalize(r[c.key])
-        const cellShown = normalize(valueToText(r, c.key))
-
-        const text = normalize(st.text)
-        if (text) {
-          if (!cellRaw.includes(text) && !cellShown.includes(text)) return false
-        }
-
-        if (st.selected?.length) {
-          const shown = valueToText(r, c.key)
-          if (!st.selected.includes(shown)) return false
-        }
-      }
-
-      return true
-    })
-  }, [rows, q, filters])
-
-  const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE))
-  const safePage = Math.min(page, totalPages)
-
-  const pagedRows = useMemo(() => {
-    const start = (safePage - 1) * PAGE_SIZE
-    return filteredRows.slice(start, start + PAGE_SIZE)
-  }, [filteredRows, safePage])
+  const uniqueOptionsByColumn = useUniqueOptions(rows)
+  const filteredRows = useFilteredRows(rows, q, filters)
+  const { pagedRows, safePage, totalPages } = usePagedRows(filteredRows, page, PAGE_SIZE)
 
   const clearAll = () => {
     setQ('')
@@ -228,57 +155,39 @@ export function CdrTable() {
     })
   }
 
+  const onSavedRow = (uniqueid: string, changes: Partial<CdrRow>) => {
+    setRows((prev) => prev.map((r) => (r.uniqueid === uniqueid ? ({ ...r, ...changes } as CdrRow) : r)))
+  }
+
   if (error) return <div style={{ padding: 16 }}>Error: {error}</div>
 
   return (
-    <div
-      style={{
-        padding: 16,
-        height: '100vh', // ✅ evita scroll del body
-        overflow: 'hidden', // ✅ scroll solo en la tabla
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 12,
-      }}
-    >
-      <h2 style={{ margin: 0 }}>
+    <div style={styles.root}>
+      <h2 style={styles.title}>
         CDR (mostrando {pagedRows.length} de {filteredRows.length})
       </h2>
 
-      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+      <div style={styles.topBar}>
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Buscar en toda la tabla..."
-          style={{ ...inputStyle, minWidth: 320 }}
+          style={{ ...styles.input, minWidth: 320 }}
         />
 
-        <button onClick={clearAll} style={buttonStyle}>
+        <button onClick={clearAll} style={styles.button}>
           Limpiar filtros
+        </button>
+
+        <button onClick={() => setIsEditOpen(true)} style={styles.buttonPrimary}>
+          Editar
         </button>
       </div>
 
-      {/* ✅ Área tabla: ocupa lo disponible, sin padding extra -> no deja hueco raro */}
-      <div
-        style={{
-          flex: 1,
-          overflow: 'auto',
-          borderRadius: 12,
-          border: '1px solid #2a2a2a',
-          background: '#0f0f0f',
-        }}
-      >
-        <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+      <div style={styles.tableViewport}>
+        <table style={styles.table}>
           <thead>
-            {/* ✅ header sticky tipo Excel */}
-            <tr
-              style={{
-                position: 'sticky',
-                top: 0,
-                zIndex: 20,
-                background: '#121212',
-              }}
-            >
+            <tr style={styles.theadRow}>
               {COLUMNS.map((c) => {
                 const st = filters[c.key]
                 const isOpen = openFilterKey === c.key
@@ -295,17 +204,7 @@ export function CdrTable() {
                   : []
 
                 return (
-                  <th
-                    key={c.key}
-                    style={{
-                      textAlign: 'left',
-                      borderBottom: '1px solid #333',
-                      padding: 8,
-                      whiteSpace: 'nowrap',
-                      position: 'relative',
-                      background: '#121212',
-                    }}
-                  >
+                  <th key={c.key} style={styles.th}>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                       {c.label}
 
@@ -329,29 +228,14 @@ export function CdrTable() {
                     </span>
 
                     {isOpen && (
-                      <div
-                        data-filter-popover="true"
-                        style={{
-                          position: 'absolute',
-                          top: '100%',
-                          left: 0,
-                          marginTop: 8,
-                          zIndex: 50,
-                          background: '#1a1a1a',
-                          border: '1px solid #444',
-                          borderRadius: 12,
-                          padding: 12,
-                          minWidth: 260,
-                          boxShadow: '0 10px 28px rgba(0,0,0,.45)',
-                        }}
-                      >
+                      <div data-filter-popover="true" style={styles.popover}>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                           <input
                             autoFocus
                             value={st?.text ?? ''}
                             onChange={(e) => setColText(c.key, e.target.value)}
                             placeholder={`Buscar en ${c.label}...`}
-                            style={inputStyle}
+                            style={styles.input}
                           />
 
                           {!isHighCardinality ? (
@@ -407,7 +291,7 @@ export function CdrTable() {
                               >
                                 <button
                                   type="button"
-                                  style={smallButtonStyle}
+                                  style={styles.smallButton}
                                   onClick={() => setColSelected(c.key, filteredOptions)}
                                 >
                                   Seleccionar todo
@@ -415,7 +299,7 @@ export function CdrTable() {
 
                                 <button
                                   type="button"
-                                  style={smallButtonStyle}
+                                  style={styles.smallButton}
                                   onClick={() => setColSelected(c.key, [])}
                                 >
                                   Limpiar selección
@@ -436,12 +320,12 @@ export function CdrTable() {
                                 clearCol(c.key)
                                 setOpenFilterKey(null)
                               }}
-                              style={smallButtonStyle}
+                              style={styles.smallButton}
                             >
                               Quitar
                             </button>
 
-                            <button type="button" onClick={() => setOpenFilterKey(null)} style={smallButtonStyle}>
+                            <button type="button" onClick={() => setOpenFilterKey(null)} style={styles.smallButton}>
                               Cerrar
                             </button>
                           </div>
@@ -458,17 +342,9 @@ export function CdrTable() {
             {pagedRows.map((r, idx) => (
               <tr key={`${r.uniqueid}-${r.calldate}-${idx}`}>
                 {COLUMNS.map((c) => {
-                  const v = r[c.key]
-                  const text = c.key === 'calldate' ? safeDate(v) : String(v)
+                  const text = c.key === 'calldate' ? safeDate(r[c.key]) : String(r[c.key] ?? '')
                   return (
-                    <td
-                      key={c.key}
-                      style={{
-                        padding: 8,
-                        borderBottom: '1px solid #2f2f2f',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
+                    <td key={c.key} style={styles.td}>
                       {text}
                     </td>
                   )
@@ -487,12 +363,11 @@ export function CdrTable() {
         </table>
       </div>
 
-      {/* ✅ Footer SIEMPRE visible, sin necesidad de scroll */}
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end' }}>
+      <div style={styles.footer}>
         <button
           onClick={() => setPage((p) => Math.max(1, p - 1))}
           disabled={safePage === 1}
-          style={buttonStyle}
+          style={styles.button}
         >
           ← Anterior
         </button>
@@ -504,11 +379,19 @@ export function CdrTable() {
         <button
           onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
           disabled={safePage === totalPages}
-          style={buttonStyle}
+          style={styles.button}
         >
           Siguiente →
         </button>
       </div>
+
+      {isEditOpen && (
+        <CdrEditModal
+          rows={filteredRows} // o pagedRows si solo quieres editar la página actual
+          onClose={() => setIsEditOpen(false)}
+          onSavedRow={onSavedRow}
+        />
+      )}
     </div>
   )
 }
