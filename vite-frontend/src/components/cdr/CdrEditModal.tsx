@@ -121,10 +121,9 @@ export function CdrEditModal({ rows, onClose, onSavedRow }: Props) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const totalChanges = useMemo(
-    () => Object.values(draft).reduce((acc, rowChanges) => acc + Object.keys(rowChanges).length, 0),
-    [draft]
-  )
+  const totalChanges = useMemo(() => {
+    return Object.values(draft).reduce((acc, rowChanges) => acc + Object.keys(rowChanges).length, 0)
+  }, [draft])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -134,11 +133,28 @@ export function CdrEditModal({ rows, onClose, onSavedRow }: Props) {
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose])
 
+  const getDraftValue = (rowKey: string, col: keyof CdrRow): CdrRow[keyof CdrRow] | undefined => {
+    return draft[rowKey]?.[col]
+  }
+
+  const isCellEdited = (r: CdrRow, col: keyof CdrRow) => {
+    const rowKey = getRowKey(r)
+    return getDraftValue(rowKey, col) !== undefined
+  }
+
+  const getDisplayText = (r: CdrRow, col: keyof CdrRow) => {
+    const rowKey = getRowKey(r)
+    const edited = getDraftValue(rowKey, col)
+    const raw = edited !== undefined ? edited : r[col]
+    return col === 'calldate' ? safeDate(raw) : String(raw ?? '')
+  }
+
   const beginEdit = (r: CdrRow, col: keyof CdrRow) => {
     if (!isEditable(col)) return
     const rowKey = getRowKey(r)
     setActive({ rowKey, col })
-    const current = draft[rowKey]?.[col] ?? r[col]
+
+    const current = getDraftValue(rowKey, col) ?? r[col]
     setValue(String(current ?? ''))
     setError(null)
   }
@@ -146,32 +162,35 @@ export function CdrEditModal({ rows, onClose, onSavedRow }: Props) {
   const commitCell = () => {
     if (!active) return
     const { rowKey, col } = active
+
+    // Guardar el valor convertido (números, etc.)
+    const nextValue = castValue(col, value)
+
     setDraft((prev) => ({
       ...prev,
       [rowKey]: {
         ...(prev[rowKey] ?? {}),
-        [col]: castValue(col, value),
+        [col]: nextValue,
       },
     }))
-    setActive(null)
-  }
 
-  const isCellEdited = (r: CdrRow, col: keyof CdrRow) => {
-    const rowKey = getRowKey(r)
-    return draft[rowKey]?.[col] !== undefined
+    setActive(null)
   }
 
   const saveAll = async () => {
     setSaving(true)
     setError(null)
+
     try {
       for (const r of rows) {
         const rowKey = getRowKey(r)
         const changes = draft[rowKey]
         if (!changes || Object.keys(changes).length === 0) continue
+
         await patchCdr(r.uniqueid, changes)
         onSavedRow(r.uniqueid, changes)
       }
+
       setDraft({})
       onClose()
     } catch (e) {
@@ -229,12 +248,8 @@ export function CdrEditModal({ rows, onClose, onSavedRow }: Props) {
                   <tr key={`${r.uniqueid}-${r.calldate}-${idx}`}>
                     {COLUMNS.map((c) => {
                       const col = c.key
-                      const isEditing = active?.rowKey === getRowKey(r) && active?.col === col
-
-                      const baseText = col === 'calldate' ? safeDate(r[col]) : String(r[col] ?? '')
-                      const shownText = isCellEdited(r, col)
-                        ? String((draft[getRowKey(r)]?.[col] as any) ?? '')
-                        : baseText
+                      const rowKey = getRowKey(r)
+                      const isEditing = active?.rowKey === rowKey && active?.col === col
 
                       return (
                         <td
@@ -259,7 +274,7 @@ export function CdrEditModal({ rows, onClose, onSavedRow }: Props) {
                               style={{ ...styles.input, padding: 8, width: '100%' }}
                             />
                           ) : (
-                            <span>{shownText}</span>
+                            <span>{getDisplayText(r, col)}</span>
                           )}
                         </td>
                       )
