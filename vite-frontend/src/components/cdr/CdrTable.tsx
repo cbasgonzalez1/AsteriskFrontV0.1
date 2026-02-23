@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { CdrRow, FiltersState } from './cdrTypes'
 import { COLUMNS } from './cdrColumns'
 import { fetchCdr } from '../../api/cdrApi'
-import { MAX_OPTIONS, PAGE_SIZE, normalize, safeDate, valueToText } from './cdrUtils'
+import { MAX_OPTIONS, PAGE_SIZE, normalize, safeDate } from './cdrUtils'
 import { useFilteredRows, usePagedRows, useUniqueOptions } from './useCdrFilters'
 import { CdrEditModal } from './CdrEditModal'
 
@@ -119,18 +119,19 @@ export function CdrTable() {
     }
   }, [])
 
-  useEffect(() => {
-    setPage(1)
-  }, [q, filters])
-
   const uniqueOptionsByColumn = useUniqueOptions(rows)
   const filteredRows = useFilteredRows(rows, q, filters)
   const { pagedRows, safePage, totalPages } = usePagedRows(filteredRows, page, PAGE_SIZE)
+
+  // ✅ Evita setState en effects: clamp solo cuando el usuario navega
+  const clampPage = (p: number) => Math.min(totalPages, Math.max(1, p))
 
   const clearAll = () => {
     setQ('')
     setFilters({})
     setOpenFilterKey(null)
+    // opcional: si quieres que el botón "Limpiar filtros" vuelva a la primera página
+    setPage(1)
   }
 
   const setColText = (key: keyof CdrRow, text: string) => {
@@ -319,6 +320,7 @@ export function CdrTable() {
                               onClick={() => {
                                 clearCol(c.key)
                                 setOpenFilterKey(null)
+                                setPage(1) // opcional: al cambiar filtro de columna, vuelve a la primera página
                               }}
                               style={styles.smallButton}
                             >
@@ -365,7 +367,7 @@ export function CdrTable() {
 
       <div style={styles.footer}>
         <button
-          onClick={() => setPage((p) => Math.max(1, p - 1))}
+          onClick={() => setPage((p) => clampPage(p - 1))}
           disabled={safePage === 1}
           style={styles.button}
         >
@@ -377,7 +379,7 @@ export function CdrTable() {
         </span>
 
         <button
-          onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+          onClick={() => setPage((p) => clampPage(p + 1))}
           disabled={safePage === totalPages}
           style={styles.button}
         >
